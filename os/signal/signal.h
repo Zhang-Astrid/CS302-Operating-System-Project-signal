@@ -3,6 +3,7 @@
 
 #include "../types.h"
 
+#define NSIG 10
 #define SIGUSR0 1
 #define SIGUSR1 2
 #define SIGUSR2 3
@@ -41,7 +42,7 @@ struct ucontext {
     sigset_t uc_sigmask;
     struct mcontext {
         uint64 epc;
-        uint64 regs[31];
+        uint64 regs[32];
     } uc_mcontext;
 };
 

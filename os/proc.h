@@ -5,6 +5,7 @@
 #include "riscv.h"
 #include "vm.h"
 #include "signal/ksignal.h"
+#include "signal/signal.h"
 
 enum {
     STDIN  = 0,
