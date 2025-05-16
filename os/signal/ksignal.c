@@ -64,7 +64,7 @@ int do_signal(void) {
     sigset_t pending = p->signal.sigpending & ~p->signal.sigmask;
     
     if (pending == 0) {
-        return 0;
+        return -EFAULT;
     }
     
     // Find the highest priority pending signal
@@ -114,63 +114,89 @@ int do_signal(void) {
     uint64 sp = tf->sp;
     
     // Allocate space for siginfo and ucontext on user stack
-    sp -= sizeof(siginfo_t);
-    siginfo_t *info = (siginfo_t *)sp;
-    memset(info, 0, sizeof(siginfo_t));
-    info->si_signo = signo;
+    // sp -= sizeof(siginfo_t);
+    // siginfo_t *info = (siginfo_t *)sp;
+    // memset(info, 0, sizeof(siginfo_t));
+    // info->si_signo = signo;
     
-    sp -= sizeof(struct ucontext);
-    struct ucontext *uc = (struct ucontext *)sp;
+    // sp -= sizeof(struct ucontext);
+    // struct ucontext *uc = (struct ucontext *)sp;
+    sp = sp & ~0xF;
+    uint64 user_uc_addr = sp - sizeof(struct ucontext);
+    uint64 user_info_addr = user_uc_addr - sizeof(siginfo_t);
+
+    // 2. 检查用户地址合法
+    if (!is_user_address(user_info_addr) ||
+    !is_user_address(user_info_addr + sizeof(siginfo_t) - 1) ||
+    !is_user_address(user_uc_addr) ||
+    !is_user_address(user_uc_addr + sizeof(struct ucontext) - 1)) {
+    return -EFAULT;
+}
+
+    // 3. 构造内核临时结构体
+    siginfo_t kinfo;
+    memset(&kinfo, 0, sizeof(siginfo_t));
+    kinfo.si_signo = signo;
+
+    struct ucontext kuc;
+    kuc.uc_mcontext.epc = tf->epc;
+    kuc.uc_mcontext.regs[0] = 0;
+    kuc.uc_mcontext.regs[1] = tf->ra;
+    kuc.uc_mcontext.regs[2] = tf->sp;
+    kuc.uc_mcontext.regs[3] = tf->gp;
+    kuc.uc_mcontext.regs[4] = tf->tp;
+    kuc.uc_mcontext.regs[5] = tf->t0;
+    kuc.uc_mcontext.regs[6] = tf->t1;
+    kuc.uc_mcontext.regs[7] = tf->t2;
+    kuc.uc_mcontext.regs[8] = tf->s0;
+    kuc.uc_mcontext.regs[9] = tf->s1;
+    kuc.uc_mcontext.regs[10] = tf->a0;
+    kuc.uc_mcontext.regs[11] = tf->a1;
+    kuc.uc_mcontext.regs[12] = tf->a2;
+    kuc.uc_mcontext.regs[13] = tf->a3;
+    kuc.uc_mcontext.regs[14] = tf->a4;
+    kuc.uc_mcontext.regs[15] = tf->a5;
+    kuc.uc_mcontext.regs[16] = tf->a6;
+    kuc.uc_mcontext.regs[17] = tf->a7;
+    kuc.uc_mcontext.regs[18] = tf->s2;
+    kuc.uc_mcontext.regs[19] = tf->s3;
+    kuc.uc_mcontext.regs[20] = tf->s4;
+    kuc.uc_mcontext.regs[21] = tf->s5;
+    kuc.uc_mcontext.regs[22] = tf->s6;
+    kuc.uc_mcontext.regs[23] = tf->s7;
+    kuc.uc_mcontext.regs[24] = tf->s8;
+    kuc.uc_mcontext.regs[25] = tf->s9;
+    kuc.uc_mcontext.regs[26] = tf->s10;
+    kuc.uc_mcontext.regs[27] = tf->s11;
+    kuc.uc_mcontext.regs[28] = tf->t3;
+    kuc.uc_mcontext.regs[29] = tf->t4;
+    kuc.uc_mcontext.regs[30] = tf->t5;
+    kuc.uc_mcontext.regs[31] = tf->t6;
     
-    // Save current context
-    uc->uc_mcontext.epc = tf->epc;
-    // Save all general purpose registers (x0-x31)
-    uc->uc_mcontext.regs[0] = 0; // x0 is always zero
-    uc->uc_mcontext.regs[1] = tf->ra;
-    uc->uc_mcontext.regs[2] = tf->sp;
-    uc->uc_mcontext.regs[3] = tf->gp;
-    uc->uc_mcontext.regs[4] = tf->tp;
-    uc->uc_mcontext.regs[5] = tf->t0;
-    uc->uc_mcontext.regs[6] = tf->t1;
-    uc->uc_mcontext.regs[7] = tf->t2;
-    uc->uc_mcontext.regs[8] = tf->s0;
-    uc->uc_mcontext.regs[9] = tf->s1;
-    uc->uc_mcontext.regs[10] = tf->a0;
-    uc->uc_mcontext.regs[11] = tf->a1;
-    uc->uc_mcontext.regs[12] = tf->a2;
-    uc->uc_mcontext.regs[13] = tf->a3;
-    uc->uc_mcontext.regs[14] = tf->a4;
-    uc->uc_mcontext.regs[15] = tf->a5;
-    uc->uc_mcontext.regs[16] = tf->a6;
-    uc->uc_mcontext.regs[17] = tf->a7;
-    uc->uc_mcontext.regs[18] = tf->s2;
-    uc->uc_mcontext.regs[19] = tf->s3;
-    uc->uc_mcontext.regs[20] = tf->s4;
-    uc->uc_mcontext.regs[21] = tf->s5;
-    uc->uc_mcontext.regs[22] = tf->s6;
-    uc->uc_mcontext.regs[23] = tf->s7;
-    uc->uc_mcontext.regs[24] = tf->s8;
-    uc->uc_mcontext.regs[25] = tf->s9;
-    uc->uc_mcontext.regs[26] = tf->s10;
-    uc->uc_mcontext.regs[27] = tf->s11;
-    uc->uc_mcontext.regs[28] = tf->t3;
-    uc->uc_mcontext.regs[29] = tf->t4;
-    uc->uc_mcontext.regs[30] = tf->t5;
-    uc->uc_mcontext.regs[31] = tf->t6;
-    
-    uc->uc_sigmask = p->signal.sigmask;
+    kuc.uc_sigmask = p->signal.sigmask;
     
     // Update signal mask (block current signal and signals in sa_mask)
     p->signal.sigmask |= sigmask(signo) | sa->sa_mask;
     
     // Set up trapframe for signal handler
-    tf->epc = (uint64)sa->sa_sigaction;  // Handler address
-    tf->sp = sp;                         // New stack pointer
-    tf->a0 = signo;                      // First argument (signo)
-    tf->a1 = (uint64)info;               // Second argument (siginfo)
-    tf->a2 = (uint64)uc;                 // Third argument (ucontext)
-    tf->ra = (uint64)sa->sa_restorer;    // Return address (sigreturn)
-    
+    acquire(&p->mm->lock);
+    if (copy_to_user(p->mm, user_info_addr, (char *)&kinfo, sizeof(siginfo_t)) < 0) {
+        release(&p->mm->lock);
+        return -EFAULT;
+    }
+    if (copy_to_user(p->mm, user_uc_addr, (char *)&kuc, sizeof(struct ucontext)) < 0) {
+        release(&p->mm->lock);
+        return -EFAULT;
+    }
+    release(&p->mm->lock);
+
+// 5. 设置 trapframe
+    tf->sp = user_info_addr; // 栈顶
+    tf->a0 = signo;
+    tf->a1 = user_info_addr;
+    tf->a2 = user_uc_addr;
+    tf->epc = (uint64)sa->sa_sigaction;
+    tf->ra = (uint64)sa->sa_restorer;
     return 0;
 }
 
@@ -221,46 +247,48 @@ int sys_sigreturn() {
     struct ucontext *uc = (struct ucontext *)tf->a2;
 
     // Validate user pointer
-    if (!is_user_address((uint64)uc)) {
+    struct ucontext kuc;
+    acquire(&p->mm->lock);
+    if (copy_from_user(p->mm, (char *)&kuc, tf->a2, sizeof(struct ucontext)) < 0) {
+        release(&p->mm->lock);  // 解锁
         return -EFAULT;
     }
 
-    // Restore registers
-    tf->epc = uc->uc_mcontext.epc;
-    tf->ra = uc->uc_mcontext.regs[1];
-    tf->sp = uc->uc_mcontext.regs[2];
-    tf->gp = uc->uc_mcontext.regs[3];
-    tf->tp = uc->uc_mcontext.regs[4];
-    tf->t0 = uc->uc_mcontext.regs[5];
-    tf->t1 = uc->uc_mcontext.regs[6];
-    tf->t2 = uc->uc_mcontext.regs[7];
-    tf->s0 = uc->uc_mcontext.regs[8];
-    tf->s1 = uc->uc_mcontext.regs[9];
-    tf->a0 = uc->uc_mcontext.regs[10];
-    tf->a1 = uc->uc_mcontext.regs[11];
-    tf->a2 = uc->uc_mcontext.regs[12];
-    tf->a3 = uc->uc_mcontext.regs[13];
-    tf->a4 = uc->uc_mcontext.regs[14];
-    tf->a5 = uc->uc_mcontext.regs[15];
-    tf->a6 = uc->uc_mcontext.regs[16];
-    tf->a7 = uc->uc_mcontext.regs[17];
-    tf->s2 = uc->uc_mcontext.regs[18];
-    tf->s3 = uc->uc_mcontext.regs[19];
-    tf->s4 = uc->uc_mcontext.regs[20];
-    tf->s5 = uc->uc_mcontext.regs[21];
-    tf->s6 = uc->uc_mcontext.regs[22];
-    tf->s7 = uc->uc_mcontext.regs[23];
-    tf->s8 = uc->uc_mcontext.regs[24];
-    tf->s9 = uc->uc_mcontext.regs[25];
-    tf->s10 = uc->uc_mcontext.regs[26];
-    tf->s11 = uc->uc_mcontext.regs[27];
-    tf->t3 = uc->uc_mcontext.regs[28];
-    tf->t4 = uc->uc_mcontext.regs[29];
-    tf->t5 = uc->uc_mcontext.regs[30];
-    tf->t6 = uc->uc_mcontext.regs[31];
+    tf->epc = kuc.uc_mcontext.epc;
+    tf->ra = kuc.uc_mcontext.regs[1];
+    tf->sp = kuc.uc_mcontext.regs[2];
+    tf->gp = kuc.uc_mcontext.regs[3];
+    tf->tp = kuc.uc_mcontext.regs[4];
+    tf->t0 = kuc.uc_mcontext.regs[5];
+    tf->t1 = kuc.uc_mcontext.regs[6];
+    tf->t2 = kuc.uc_mcontext.regs[7];
+    tf->s0 = kuc.uc_mcontext.regs[8];
+    tf->s1 = kuc.uc_mcontext.regs[9];
+    tf->a0 = kuc.uc_mcontext.regs[10];
+    tf->a1 = kuc.uc_mcontext.regs[11];
+    tf->a2 = kuc.uc_mcontext.regs[12];
+    tf->a3 = kuc.uc_mcontext.regs[13];
+    tf->a4 = kuc.uc_mcontext.regs[14];
+    tf->a5 = kuc.uc_mcontext.regs[15];
+    tf->a6 = kuc.uc_mcontext.regs[16];
+    tf->a7 = kuc.uc_mcontext.regs[17];
+    tf->s2 = kuc.uc_mcontext.regs[18];
+    tf->s3 = kuc.uc_mcontext.regs[19];
+    tf->s4 = kuc.uc_mcontext.regs[20];
+    tf->s5 = kuc.uc_mcontext.regs[21];
+    tf->s6 = kuc.uc_mcontext.regs[22];
+    tf->s7 = kuc.uc_mcontext.regs[23];
+    tf->s8 = kuc.uc_mcontext.regs[24];
+    tf->s9 = kuc.uc_mcontext.regs[25];
+    tf->s10 = kuc.uc_mcontext.regs[26];
+    tf->s11 = kuc.uc_mcontext.regs[27];
+    tf->t3 = kuc.uc_mcontext.regs[28];
+    tf->t4 = kuc.uc_mcontext.regs[29];
+    tf->t5 = kuc.uc_mcontext.regs[30];
+    tf->t6 = kuc.uc_mcontext.regs[31];
 
-    // Restore signal mask
-    p->signal.sigmask = uc->uc_sigmask;
+    p->signal.sigmask = kuc.uc_sigmask;
+
 
     return 0;
 }
