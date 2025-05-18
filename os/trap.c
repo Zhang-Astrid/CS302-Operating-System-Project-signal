@@ -250,6 +250,5 @@ void usertrapret() {
     // and switches to user mode with sret.
     uint64 fn = TRAMPOLINE + (userret - trampoline);
     tracef("return to user @%p, fn %p", trapframe->epc);
-    while (do_signal() == 0);
     ((void (*)(uint64, uint64, uint64))fn)(TRAPFRAME, satp, stvec);
 }
