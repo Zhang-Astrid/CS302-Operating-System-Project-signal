@@ -4,8 +4,21 @@
 #include <proc.h>
 #include <trap.h>
 
+// Add PAGE_SIZE definition if not defined elsewhere
+#ifndef PAGE_SIZE
+#define PAGE_SIZE 4096
+#endif
+
 static inline int is_user_address(uint64 addr) {
     return addr < USER_TOP;  // 假设 USER_TOP 是用户地址空间的上限
+}
+
+// Add a more robust validation function
+static inline int is_valid_user_address(uint64 addr, uint64 size) {
+    return is_user_address(addr) && 
+           is_user_address(addr + size - 1) && 
+           addr >= PAGE_SIZE && 
+           addr % 8 == 0;  // Check alignment for RISC-V
 }
 
 /**
@@ -197,6 +210,12 @@ int do_signal(void) {
     tf->a2 = user_uc_addr;
     tf->epc = (uint64)sa->sa_sigaction;
     tf->ra = (uint64)sa->sa_restorer;
+
+    p->signal.last_context_addr = user_uc_addr;
+
+    printf("[do_signal] Set context at user_uc_addr=%p, info=%p\n", 
+           user_uc_addr, user_info_addr);
+
     return 0;
 }
 
@@ -244,15 +263,39 @@ int sys_sigreturn() {
     struct trapframe *tf = p->trapframe;
 
     // Get ucontext from a2 register
-    struct ucontext *uc = (struct ucontext *)tf->a2;
+    uint64 context_addr = p->signal.last_context_addr;
+    
+    // Additional safety check - compare with a2 and log discrepancies
+    if (context_addr != tf->a2) {
+        printf("[sigreturn] Warning: saved context addr %p differs from a2 %p\n", 
+               context_addr, tf->a2);
+    }
 
     // Validate user pointer
     struct ucontext kuc;
     acquire(&p->mm->lock);
-    if (copy_from_user(p->mm, (char *)&kuc, tf->a2, sizeof(struct ucontext)) < 0) {
-        release(&p->mm->lock);  // 解锁
+    
+    // More robust validation - check for realistic memory addresses
+    if (!is_user_address((uint64)context_addr) ||
+        !is_user_address((uint64)context_addr + sizeof(struct ucontext) - 1) ||
+        (uint64)context_addr < PAGE_SIZE) {  // Ensure address is at least beyond first page (NULL page)
+        printf("[sigreturn] Invalid context address: %p\n", context_addr);
+        release(&p->mm->lock);
         return -EFAULT;
     }
+    
+    // Print info but don't try to access memory yet
+    printf("[sigreturn] tf->a2 = %p, sizeof(ucontext) = %d\n", tf->a2, sizeof(struct ucontext));
+    
+    // Only try to access memory after proper validation
+    if (copy_from_user(p->mm, (char *)&kuc, context_addr, sizeof(struct ucontext)) < 0) {
+        printf("[sigreturn] copy_from_user failed\n");
+        release(&p->mm->lock);
+        return -EFAULT;
+    }
+    
+    // After successful copy, now we can print some content safely
+    printf("[sigreturn] Restored context: epc=%p\n", kuc.uc_mcontext.epc);
 
     tf->epc = kuc.uc_mcontext.epc;
     tf->ra = kuc.uc_mcontext.regs[1];
@@ -289,6 +332,7 @@ int sys_sigreturn() {
 
     p->signal.sigmask = kuc.uc_sigmask;
 
+    release(&p->mm->lock);  // 解锁
 
     return 0;
 }
