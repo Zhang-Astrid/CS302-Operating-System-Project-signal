@@ -4,12 +4,20 @@
 #include <vm.h>
 #include "signal.h"
 
+#define MAX_SIGNAL_DEPTH 4
+
+struct signal_context_stack {
+    uint64 context_addrs[MAX_SIGNAL_DEPTH];
+    int top;
+};
+
 struct ksignal {
     sigaction_t sa[SIGMAX + 1];
     siginfo_t siginfos[SIGMAX + 1];
     sigset_t sigmask;       // signal mask, when set to 1, the signal is blocked
     sigset_t sigpending;
-    uint64 last_context_addr;
+    // uint64 last_context_addr;
+    struct signal_context_stack ctx_stack;
 };
 
 struct proc;  // forward declaration
