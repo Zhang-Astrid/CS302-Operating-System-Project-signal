@@ -41,6 +41,7 @@ int siginit(struct proc *p) {
     
     // Initialize siginfo structures (zero them out)
     memset(p->signal.siginfos, 0, sizeof(p->signal.siginfos));
+    p->signal.ctx_stack.top = -1;  // 栈初始化为空
     
     return 0;
 }
@@ -187,6 +188,12 @@ int do_signal(void) {
     kuc.uc_mcontext.regs[31] = tf->t6;
     
     kuc.uc_sigmask = p->signal.sigmask;
+
+    if (p->signal.ctx_stack.top + 1 >= MAX_SIGNAL_DEPTH)
+        panic("signal context stack overflow");
+
+    p->signal.ctx_stack.top++;
+    p->signal.ctx_stack.context_addrs[p->signal.ctx_stack.top] = user_uc_addr;
     
     // Update signal mask (block current signal and signals in sa_mask)
     p->signal.sigmask |= sigmask(signo) | sa->sa_mask;
@@ -211,10 +218,8 @@ int do_signal(void) {
     tf->epc = (uint64)sa->sa_sigaction;
     tf->ra = (uint64)sa->sa_restorer;
 
-    p->signal.last_context_addr = user_uc_addr;
-
-    printf("[do_signal] Set context at user_uc_addr=%p, info=%p\n", 
-           user_uc_addr, user_info_addr);
+    // p->signal.last_context_addr = user_uc_addr;
+    // printf("[do_signal] Set context at user_uc_addr=%p, info=%p\n", user_uc_addr, user_info_addr);
 
     return 0;
 }
@@ -263,13 +268,17 @@ int sys_sigreturn() {
     struct trapframe *tf = p->trapframe;
 
     // Get ucontext from a2 register
-    uint64 context_addr = p->signal.last_context_addr;
+    // uint64 context_addr = p->signal.last_context_addr;
+    if (p->signal.ctx_stack.top < 0)
+        return -EFAULT;
+
+    uint64 context_addr = p->signal.ctx_stack.context_addrs[p->signal.ctx_stack.top--];
     
     // Additional safety check - compare with a2 and log discrepancies
-    if (context_addr != tf->a2) {
-        printf("[sigreturn] Warning: saved context addr %p differs from a2 %p\n", 
-               context_addr, tf->a2);
-    }
+    // if (context_addr != tf->a2) {
+    //     printf("[sigreturn] Warning: saved context addr %p differs from a2 %p\n", 
+    //            context_addr, tf->a2);
+    // }
 
     // Validate user pointer
     struct ucontext kuc;
@@ -279,23 +288,23 @@ int sys_sigreturn() {
     if (!is_user_address((uint64)context_addr) ||
         !is_user_address((uint64)context_addr + sizeof(struct ucontext) - 1) ||
         (uint64)context_addr < PAGE_SIZE) {  // Ensure address is at least beyond first page (NULL page)
-        printf("[sigreturn] Invalid context address: %p\n", context_addr);
+        // printf("[sigreturn] Invalid context address: %p\n", context_addr);
         release(&p->mm->lock);
         return -EFAULT;
     }
     
     // Print info but don't try to access memory yet
-    printf("[sigreturn] tf->a2 = %p, sizeof(ucontext) = %d\n", tf->a2, sizeof(struct ucontext));
+    // printf("[sigreturn] tf->a2 = %p, sizeof(ucontext) = %d\n", tf->a2, sizeof(struct ucontext));
     
     // Only try to access memory after proper validation
     if (copy_from_user(p->mm, (char *)&kuc, context_addr, sizeof(struct ucontext)) < 0) {
-        printf("[sigreturn] copy_from_user failed\n");
+        // printf("[sigreturn] copy_from_user failed\n");
         release(&p->mm->lock);
         return -EFAULT;
     }
     
     // After successful copy, now we can print some content safely
-    printf("[sigreturn] Restored context: epc=%p\n", kuc.uc_mcontext.epc);
+    // printf("[sigreturn] Restored context: epc=%p\n", kuc.uc_mcontext.epc);
 
     tf->epc = kuc.uc_mcontext.epc;
     tf->ra = kuc.uc_mcontext.regs[1];
