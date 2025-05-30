@@ -122,7 +122,7 @@ int do_signal(void) {
     if (sa->sa_sigaction == SIG_IGN) {
         return 0;
     }
-    
+
     // Prepare user stack for signal handler
     struct trapframe *tf = p->trapframe;
     uint64 sp = tf->sp;
@@ -383,14 +383,26 @@ int sys_sigkill(int pid, int signo, int code) {
     }
     
     // Set the signal as pending
-    acquire(&target->lock);
-    target->signal.sigpending |= sigmask(signo);
+    // acquire(&target->lock);
+    // target->signal.sigpending |= sigmask(signo);
     
-    // For SIGKILL, terminate immediately
+    // // For SIGKILL, terminate immediately
+    // if (signo == SIGKILL) {
+    //     setkilled(target, -10 - signo);
+    // }
+    
+    // release(&target->lock);
+
+    // 0530ZS update
+    // 对于 SIGKILL，直接调用 setkilled，让 setkilled 自己管理锁
     if (signo == SIGKILL) {
-        setkilled(target, -10 - signo);
+        setkilled(target, -10 - signo); // 已经有锁了，不要重复获取
+        return 0; 
     }
     
+    // 对于其他信号，使用锁保护 pending 标志的修改
+    acquire(&target->lock);
+    target->signal.sigpending |= sigmask(signo);
     release(&target->lock);
     
     return 0;
