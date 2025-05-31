@@ -126,15 +126,7 @@ int do_signal(void) {
     // Prepare user stack for signal handler
     struct trapframe *tf = p->trapframe;
     uint64 sp = tf->sp;
-    
-    // Allocate space for siginfo and ucontext on user stack
-    // sp -= sizeof(siginfo_t);
-    // siginfo_t *info = (siginfo_t *)sp;
-    // memset(info, 0, sizeof(siginfo_t));
-    // info->si_signo = signo;
-    
-    // sp -= sizeof(struct ucontext);
-    // struct ucontext *uc = (struct ucontext *)sp;
+
     sp = sp & ~0xF;
     uint64 user_uc_addr = sp - sizeof(struct ucontext);
     uint64 user_info_addr = user_uc_addr - sizeof(siginfo_t);
@@ -151,6 +143,13 @@ int do_signal(void) {
     siginfo_t kinfo;
     memset(&kinfo, 0, sizeof(siginfo_t));
     kinfo.si_signo = signo;
+    
+    //checkpoint 3.2
+    if (signo == SIGSEGV || signo == SIGKILL || signo == SIGTERM) {
+        kinfo.si_pid = -1; // Kernel sends the signal
+    } else {
+        kinfo.si_pid = curr_proc()->pid; // Process sends the signal
+    }
 
     struct ucontext kuc;
     kuc.uc_mcontext.epc = tf->epc;

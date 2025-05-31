@@ -18,6 +18,7 @@ struct test {
     {basic10, "basic10"},
     {basic11, "basic11"},
     {basic20, "basic20"},
+    {sigchld_test, "sigchld_test"}, // Add the new test case here
     {NULL,    NULL     },
 };
 
