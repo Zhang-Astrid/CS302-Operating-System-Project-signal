@@ -364,6 +364,7 @@ void basic20(char *s) {
     }
 }
 
+// bonus checkpoint
 void sigchld_handler(int signo, siginfo_t* info, void* ctx) {
     assert(signo == SIGCHLD); // Ensure the signal is SIGCHLD
     assert(info->si_signo == SIGCHLD); // Verify siginfo_t contains SIGCHLD
