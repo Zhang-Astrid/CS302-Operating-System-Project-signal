@@ -365,6 +365,9 @@ void basic20(char *s) {
 }
 
 // bonus checkpoint
+
+volatile int sigchld_handled = 0;
+
 void sigchld_handler(int signo, siginfo_t* info, void* ctx) {
     assert(signo == SIGCHLD); // Ensure the signal is SIGCHLD
     assert(info->si_signo == SIGCHLD); // Verify siginfo_t contains SIGCHLD
@@ -374,10 +377,14 @@ void sigchld_handler(int signo, siginfo_t* info, void* ctx) {
     int status;
     int wpid = wait(0, &status); // Wait for the child process
     assert(wpid == info->si_pid); // Ensure the waited PID matches the one in siginfo_t
+    assert(info->si_code == status);
+    printf("SIGCHLD: pid=%d, exit code=%d\n", info->si_pid, info->si_code);
     printf("Child process %d exited with status: %d\n", wpid, status);
+    sigchld_handled = 1;
 }
 
 void sigchld_test(char* s) {
+    sigchld_handled = 0;
     sigaction_t sa = {
         .sa_sigaction = sigchld_handler,
         .sa_restorer  = sigreturn,
@@ -394,7 +401,37 @@ void sigchld_test(char* s) {
     } else {
         // Parent process
         printf("Parent process waiting for child PID: %d\n", pid);
-        sleep(10); // Wait for the child to exit and trigger SIGCHLD
+        while (!sigchld_handled) {
+            sleep(1); // 轮询等待
+        }
+        printf("Parent process finished waiting.\n");
+    }
+}
+
+void sigchld_kill_test(char* s) {
+    sigchld_handled = 0;
+    sigaction_t sa = {
+        .sa_sigaction = sigchld_handler,
+        .sa_restorer  = sigreturn,
+    };
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGCHLD, &sa, 0);
+
+    int pid = fork();
+    if (pid == 0) {
+        // Child process
+        printf("Child process started with PID: %d\n", getpid());
+        while(1) {  // 子进程无限循环
+            sleep(1);
+        }
+    } else {
+        // Parent process
+        printf("Parent process waiting for child PID: %d\n", pid);
+        sleep(2);  // 等待子进程运行
+        kill(pid);  // 杀死子进程
+        while (!sigchld_handled) {
+            sleep(1);
+        }
         printf("Parent process finished waiting.\n");
     }
 }

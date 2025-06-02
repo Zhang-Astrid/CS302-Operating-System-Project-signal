@@ -144,8 +144,11 @@ int do_signal(void) {
     memset(&kinfo, 0, sizeof(siginfo_t));
     kinfo.si_signo = signo;
     
-    //checkpoint 3.2
-    if (signo == SIGSEGV || signo == SIGKILL || signo == SIGTERM) {
+    // bonus 3.3
+    // For SIGCHLD, use the stored siginfo
+    if (signo == SIGCHLD) {
+        kinfo = p->signal.siginfos[SIGCHLD];
+    } else if (signo == SIGSEGV || signo == SIGKILL || signo == SIGTERM) {
         kinfo.si_pid = -1; // Kernel sends the signal
     } else {
         kinfo.si_pid = curr_proc()->pid; // Process sends the signal

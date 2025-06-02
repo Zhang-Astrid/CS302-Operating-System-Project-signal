@@ -340,6 +340,17 @@ void exit(int code) {
     if (wakeinit)
         wakeup(init_proc);
 
+    //bonus 3.3
+    // Send SIGCHLD to parent before waking it up
+    if (p->parent != NULL) {
+        acquire(&p->parent->lock);
+        p->parent->signal.siginfos[SIGCHLD].si_signo = SIGCHLD;
+        p->parent->signal.siginfos[SIGCHLD].si_pid = p->pid;
+        p->parent->signal.siginfos[SIGCHLD].si_code = code;
+        p->parent->signal.sigpending |= sigmask(SIGCHLD);
+        release(&p->parent->lock);
+    }
+
     // wakeup wait-ing parent.
     //  There is no race because locking against "wait_lock"
     wakeup(p->parent);
@@ -383,6 +394,18 @@ void setkilled(struct proc *p, int reason) {
     assert(reason < 0);
     acquire(&p->lock);
     p->killed = reason;
+
+    // bonus 3.3
+    // Send SIGCHLD to parent when process is killed
+    if (p->parent != NULL) {
+        acquire(&p->parent->lock);
+        p->parent->signal.siginfos[SIGCHLD].si_signo = SIGCHLD;
+        p->parent->signal.siginfos[SIGCHLD].si_pid = p->pid;
+        p->parent->signal.siginfos[SIGCHLD].si_code = reason;
+        p->parent->signal.sigpending |= sigmask(SIGCHLD);
+        release(&p->parent->lock);
+    }
+
     release(&p->lock);
 }
 
