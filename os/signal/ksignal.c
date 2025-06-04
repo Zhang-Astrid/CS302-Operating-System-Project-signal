@@ -142,16 +142,18 @@ int do_signal(void) {
     // 3. 构造内核临时结构体
     siginfo_t kinfo;
     memset(&kinfo, 0, sizeof(siginfo_t));
-    kinfo.si_signo = signo;
     
     // bonus 3.3
     // For SIGCHLD, use the stored siginfo
     if (signo == SIGCHLD) {
         kinfo = p->signal.siginfos[SIGCHLD];
     } else if (signo == SIGSEGV || signo == SIGKILL || signo == SIGTERM) {
+        kinfo.si_signo = signo;
         kinfo.si_pid = -1; // Kernel sends the signal
+        kinfo.si_code = 0;
+        kinfo.addr = 0;
     } else {
-        kinfo.si_pid = curr_proc()->pid; // Process sends the signal
+        kinfo = p->signal.siginfos[signo]; // 直接用 sys_sigkill 里设置的 siginfo
     }
 
     struct ucontext kuc;
@@ -384,17 +386,6 @@ int sys_sigkill(int pid, int signo, int code) {
         return -EINVAL;
     }
     
-    // Set the signal as pending
-    // acquire(&target->lock);
-    // target->signal.sigpending |= sigmask(signo);
-    
-    // // For SIGKILL, terminate immediately
-    // if (signo == SIGKILL) {
-    //     setkilled(target, -10 - signo);
-    // }
-    
-    // release(&target->lock);
-
     // 0530ZS update
     // 对于 SIGKILL，直接调用 setkilled，让 setkilled 自己管理锁
     if (signo == SIGKILL) {
@@ -405,6 +396,11 @@ int sys_sigkill(int pid, int signo, int code) {
     // 对于其他信号，使用锁保护 pending 标志的修改
     acquire(&target->lock);
     target->signal.sigpending |= sigmask(signo);
+    // 填充 siginfo
+    target->signal.siginfos[signo].si_signo = signo;
+    target->signal.siginfos[signo].si_pid = curr_proc()->pid;
+    target->signal.siginfos[signo].si_code = code;
+    target->signal.siginfos[signo].addr = 0;
     release(&target->lock);
     
     return 0;

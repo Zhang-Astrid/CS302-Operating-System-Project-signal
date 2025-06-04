@@ -381,6 +381,7 @@ void sigchld_handler(int signo, siginfo_t* info, void* ctx) {
     printf("SIGCHLD: pid=%d, exit code=%d\n", info->si_pid, info->si_code);
     printf("Child process %d exited with status: %d\n", wpid, status);
     sigchld_handled = 1;
+    // 不要 exit(0);
 }
 
 void sigchld_test(char* s) {
@@ -405,6 +406,7 @@ void sigchld_test(char* s) {
             sleep(1); // 轮询等待
         }
         printf("Parent process finished waiting.\n");
+        exit(0);
     }
 }
 
@@ -433,5 +435,95 @@ void sigchld_kill_test(char* s) {
             sleep(1);
         }
         printf("Parent process finished waiting.\n");
+        exit(0);
     }
+}
+
+// 通用 siginfo 测试
+volatile int siginfo_self_tested = 0;
+void siginfo_self_handler(int signo, siginfo_t* info, void* ctx) {
+    assert(signo == SIGUSR0);
+    assert(info->si_signo == SIGUSR0);
+    assert(info->si_pid == getpid()); // 自发信号
+    assert(info->si_code == 0);
+    assert(info->addr == 0);
+    siginfo_self_tested = 1;
+}
+
+void siginfo_self_test(char* s) {
+    siginfo_self_tested = 0;
+    sigaction_t sa = {
+        .sa_sigaction = siginfo_self_handler,
+        .sa_restorer  = sigreturn,
+    };
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGUSR0, &sa, 0);
+    sigkill(getpid(), SIGUSR0, 0); // 自己给自己发信号
+    while (!siginfo_self_tested) {
+        sleep(1);
+    }
+    printf("siginfo_self_test passed\n");
+}
+
+volatile int siginfo_parent_tested = 0;
+int siginfo_parent_sender_pid = 0;
+void siginfo_parent_handler(int signo, siginfo_t* info, void* ctx) {
+    assert(signo == SIGUSR1);
+    assert(info->si_signo == SIGUSR1);
+    assert(info->si_pid == siginfo_parent_sender_pid); // 父进程 pid
+    assert(info->si_code == 0);
+    assert(info->addr == 0);
+    siginfo_parent_tested = 1;
+}
+
+void siginfo_parent_test(char* s) {
+    siginfo_parent_tested = 0;
+    int pid = fork();
+    if (pid == 0) {
+        // child
+        sigaction_t sa = {
+            .sa_sigaction = siginfo_parent_handler,
+            .sa_restorer  = sigreturn,
+        };
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGUSR1, &sa, 0);
+        siginfo_parent_sender_pid = getppid();
+        while (!siginfo_parent_tested) {
+            sleep(1);
+        }
+        printf("siginfo_parent_test passed\n");
+        exit(0);
+    } else {
+        // parent
+        sleep(2);
+        sigkill(pid, SIGUSR1, 0);
+        int status;
+        wait(0, &status);
+    }
+}
+
+volatile int siginfo_segv_tested = 0;
+void siginfo_segv_handler(int signo, siginfo_t* info, void* ctx) {
+    assert(signo == SIGSEGV);
+    assert(info->si_signo == SIGSEGV);
+    assert(info->si_pid == -1); // 内核信号
+    assert(info->si_code == 0);
+    // addr 字段可为 0 或未实现
+    siginfo_segv_tested = 1;
+}
+
+void siginfo_segv_test(char* s) {
+    siginfo_segv_tested = 0;
+    sigaction_t sa = {
+        .sa_sigaction = siginfo_segv_handler,
+        .sa_restorer  = sigreturn,
+    };
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, 0);
+    // 触发 SIGSEGV
+    sigkill(getpid(), SIGSEGV, 0);
+    while (!siginfo_segv_tested) {
+        sleep(1);
+    }
+    printf("siginfo_segv_test passed\n");
 }

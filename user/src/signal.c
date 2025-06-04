@@ -20,6 +20,9 @@ struct test {
     {basic20, "basic20"},
     {sigchld_test, "sigchld_test"}, // Add the new test case here
     {sigchld_kill_test, "sigchld_kill_test"},
+    {siginfo_self_test, "siginfo_self_test"},
+    {siginfo_parent_test, "siginfo_parent_test"},
+    {siginfo_segv_test, "siginfo_segv_test"},
     {NULL,    NULL     },
 };
 
